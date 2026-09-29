@@ -1,0 +1,49 @@
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: agnos
+      POSTGRES_PASSWORD: agnos
+      POSTGRES_DB: agnos
+    # exposed for `go test`; 5434 avoids clashing with a local Postgres on 5432
+    ports:
+      - "5434:5432"
+    volumes:
+      # runs once, on an empty volume, in file-name order
+      - ./migrations/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - ./mock-his/seed.sql:/docker-entrypoint-initdb.d/02-mock-his.sql:ro
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agnos -d agnos"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+  app:
+    build: .
+    environment:
+      DATABASE_URL: postgres://agnos:agnos@db:5432/agnos?sslmode=disable
+      # dev-only default; set JWT_SECRET in the environment for anything real
+      JWT_SECRET: ${JWT_SECRET:-dev-only-secret-change-me-0123456789abcdef}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - app
+
+  # stand-in for each hospital's HIS (the real domains in the assignment don't exist)
+  mock-his:
+    image: nginx:alpine
+    volumes:
+      - ./mock-his/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./mock-his/data:/data:ro
+
+volumes:
+  pgdata:
